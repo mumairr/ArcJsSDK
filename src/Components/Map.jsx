@@ -9,6 +9,8 @@ import GroupLayer from "@arcgis/core/layers/GroupLayer";
 import Measurement from "@arcgis/core/widgets/Measurement";
 import ScaleBar from "@arcgis/core/widgets/ScaleBar";
 import CoordinateConversion from "@arcgis/core/widgets/CoordinateConversion";
+import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
+import Graphic from "@arcgis/core/Graphic";
 
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -16,10 +18,20 @@ import {
   faDrawPolygon,
   faTrashAlt,
 } from "@fortawesome/free-solid-svg-icons";
-import { Button, theme, ConfigProvider, Space, Tooltip, Slider, Card } from "antd";
+import {
+  Button,
+  theme,
+  ConfigProvider,
+  Space,
+  Tooltip,
+  Slider,
+  Card,
+  Upload,
+} from "antd";
 import "antd/dist/reset.css";
 import "./Map.css";
 import { DarkModeSwitch } from "react-toggle-dark-mode";
+import { open } from "shapefile"; // Correctly importing the named function 'open'
 
 const { defaultAlgorithm, darkAlgorithm } = theme;
 
@@ -29,7 +41,7 @@ const MapComponent = () => {
   const [measurementWidget, setMeasurementWidget] = useState(null);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [populationRange, setPopulationRange] = useState([0, 300000]); // Default population range
-
+  const graphicsLayerRef = useRef(null); // Ref for GraphicsLayer
   const basemaps = {
     true: "dark-gray-vector",
     false: "gray-vector",
@@ -46,6 +58,49 @@ const MapComponent = () => {
     // Update the filter directly on the feature layer
     if (featureLayerRef.current) {
       featureLayerRef.current.definitionExpression = `POP2000 >= ${value[0]} AND POP2000 <= ${value[1]}`;
+    }
+  };
+
+  // Function to process the uploaded shapefile
+  const handleShapefileUpload = async (file) => {
+    try {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const arrayBuffer = e.target.result;
+
+        // Use 'open' function from shapefile to read shapefile
+        const source = await open(arrayBuffer);
+
+        // Process each feature in the shapefile
+        source.read().then(function log(result) {
+          if (result.done) return;
+          const feature = result.value;
+
+          const graphic = new Graphic({
+            geometry: {
+              type: "polygon", // Assuming polygons; adjust if different geometries are used
+              rings: feature.geometry.coordinates,
+            },
+            symbol: {
+              type: "simple-fill",
+              color: [51, 51, 204, 0.9],
+              outline: {
+                color: [255, 255, 255],
+                width: 1,
+              },
+            },
+            attributes: feature.properties,
+          });
+
+          graphicsLayerRef.current.add(graphic); // Add graphic to GraphicsLayer
+
+          source.read().then(log); // Recursively read next feature
+        });
+      };
+
+      reader.readAsArrayBuffer(file); // Read shapefile as ArrayBuffer
+    } catch (error) {
+      console.error("Error processing shapefile:", error);
     }
   };
 
@@ -75,6 +130,12 @@ const MapComponent = () => {
       const webmap = new WebMap({
         basemap: basemaps[isDarkMode],
       });
+
+      // Create a new GraphicsLayer for shapefile data
+      const graphicsLayer = new GraphicsLayer({
+        title: " Uploaded Shapefile Feature",
+      });
+      graphicsLayerRef.current = graphicsLayer;
 
       // Add layers to the map
       const wmsLayer = new WMSLayer({
@@ -115,7 +176,7 @@ const MapComponent = () => {
 
       const overlayGroupLayer = new GroupLayer({
         title: "Overlays",
-        layers: [wmsLayer, featureLayer],
+        layers: [wmsLayer, featureLayer, graphicsLayer],
         visibilityMode: "independent",
         opacity: 1,
       });
@@ -258,26 +319,34 @@ const MapComponent = () => {
             width: "250px",
           }}
         >
-          <Card
-            title="Filter Population Feature"
-            bordered
-          >
-            <Slider
-              range
-              min={0}
-              max={300000}
-              defaultValue={[0, 300000]}
-              step={1000}
-              tooltip={{ open: false }}
-              onChange={handlePopulationChange}
-              marks={{
-                0: "0",
-                50000: "50K",
-                100000: "100K",
-                300000: "300K",
-              }}
-            />
-          </Card>
+          <Space direction="vertical" size="small">
+            <Card title="Filter Population Feature" bordered>
+              <Slider
+                range
+                min={0}
+                max={300000}
+                defaultValue={[0, 300000]}
+                step={1000}
+                tooltip={{ open: false }}
+                onChange={handlePopulationChange}
+                marks={{
+                  0: "0",
+                  50000: "50K",
+                  100000: "100K",
+                  300000: "300K",
+                }}
+              />
+            </Card>
+            <Card title="Upload Shapefile" bordered>
+              <Upload
+                accept=".shp"
+                beforeUpload={handleShapefileUpload}
+                showUploadList={false}
+              >
+                <Button>Upload Shapefile</Button>
+              </Upload>
+            </Card>
+          </Space>
         </div>
       </ConfigProvider>
     </>
